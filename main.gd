@@ -2100,6 +2100,32 @@ func _engineer_button_rect() -> Rect2:
 func _salvage_button_rect() -> Rect2:
 	return Rect2(Vector2(safe_insets.x + 390.0, safe_insets.y + 196.0 + 4.0 * (touch_target_size + 6.0)), Vector2(140.0, touch_target_size))
 
+func _segment_intersects_rect(segment_start: Vector2, segment_end: Vector2, rect: Rect2) -> bool:
+	# Liang-Barsky clipping: test the finite segment against the rectangle bounds.
+	var direction: Vector2 = segment_end - segment_start
+	var t_min: float = 0.0
+	var t_max: float = 1.0
+	for axis in range(2):
+		var start_coord: float = segment_start.x if axis == 0 else segment_start.y
+		var delta_coord: float = direction.x if axis == 0 else direction.y
+		var min_coord: float = rect.position.x if axis == 0 else rect.position.y
+		var max_coord: float = rect.end.x if axis == 0 else rect.end.y
+		if absf(delta_coord) < 0.000001:
+			if start_coord < min_coord or start_coord > max_coord:
+				return false
+			continue
+		var t1: float = (min_coord - start_coord) / delta_coord
+		var t2: float = (max_coord - start_coord) / delta_coord
+		if t1 > t2:
+			var swap_value: float = t1
+			t1 = t2
+			t2 = swap_value
+		t_min = maxf(t_min, t1)
+		t_max = minf(t_max, t2)
+		if t_min > t_max:
+			return false
+	return true
+
 func _has_clear_building_line_of_sight(origin: Vector2, target: Vector2) -> bool:
 	var segment_rect: Rect2 = Rect2(origin, target - origin).abs().grow(1.0)
 	for building_index in _building_indices_for_rect(segment_rect):
@@ -2108,7 +2134,7 @@ func _has_clear_building_line_of_sight(origin: Vector2, target: Vector2) -> bool
 		var building_rect: Rect2 = buildings[building_index]
 		if building_rect.has_point(origin):
 			continue
-		if building_rect.intersects_segment(origin, target):
+		if _segment_intersects_rect(origin, target, building_rect):
 			return false
 	return true
 
