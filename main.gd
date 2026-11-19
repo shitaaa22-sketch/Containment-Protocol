@@ -3915,7 +3915,7 @@ func _draw_title_screen() -> void:
 	draw_rect(update_rect, Color("#183b2b"))
 	draw_rect(update_rect, Color("#79c995") if update_available else Color("#527966"), false, 1.5)
 	_draw_text(update_status, update_rect.position + Vector2(12.0, update_rect.size.y * 0.68), roundi(11.0 * ui_scale), Color("#e1f7e8"))
-	_draw_text("TACTICAL RESPONSE COMMAND  //  SECURE THE EXCLUSION ZONE", Vector2(title_size.x * 0.07, title_size.y * 0.925), roundi(9.0 * ui_scale), Color("#6e9680"))
+	_draw_text("TACTICAL RESPONSE COMMAND  //  SECURE THE EXCLUSION ZONE", Vector2(title_size.x * 0.07, title_size.y * 0.975), roundi(8.0 * ui_scale), Color("#6e9680"))
 	_draw_field_manual(title_size)
 
 func _draw_pause_overlay() -> void:
