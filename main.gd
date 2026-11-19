@@ -763,7 +763,7 @@ func _process(delta: float) -> void:
 		turret["cooldown"] = maxf(0.0, float(turret["cooldown"]) - sim_delta)
 		if float(turret["cooldown"]) <= 0.0:
 			var turret_range := float(turret.get("range", TURRET_RANGE))
-			var target_zombie := _find_nearest_zombie(turret["pos"], turret_range)
+			var target_zombie: int = _milestone17_find_turret_target(turret, turret_range)
 			if target_zombie >= 0:
 				var turret_target: Vector2 = zombies[target_zombie]["pos"]
 				var turret_damage := float(turret.get("damage", 22.0))
@@ -800,9 +800,13 @@ func _process(delta: float) -> void:
 				var unit_speed: float = 60.0 if unit_kind_for_speed == "infantry" else (58.0 if unit_kind_for_speed == "militia" else (48.0 if unit_kind_for_speed == "engineer" else (50.0 if unit_kind_for_speed == "heavy" else 52.0)))
 				if float(unit.get("triage_timer", 0.0)) > 0.0:
 					unit_speed *= 0.5
-				var unit_displacement: Vector2 = (unit_waypoint - unit_position).normalized() * unit_speed * sim_delta
+				var desired_velocity: Vector2 = (unit_waypoint - unit_position).normalized() * unit_speed
+				var current_velocity: Vector2 = unit.get("move_velocity", Vector2.ZERO)
+				var smoothed_velocity: Vector2 = current_velocity.move_toward(desired_velocity, 180.0 * sim_delta)
+				var unit_displacement: Vector2 = smoothed_velocity * sim_delta
 				unit["pos"] = _move_circle_with_buildings(unit_position, unit_displacement, 8.0, sim_delta, unit_waypoint, unit_steering)
-				unit["facing"] = unit_displacement.normalized()
+				unit["move_velocity"] = smoothed_velocity
+				unit["facing"] = smoothed_velocity.normalized()
 				unit["steering"] = unit_steering
 			else:
 				unit["move_target"] = null
@@ -2137,6 +2141,39 @@ func _has_clear_building_line_of_sight(origin: Vector2, target: Vector2) -> bool
 		if _segment_intersects_rect(origin, target, building_rect):
 			return false
 	return true
+
+func _milestone17_find_turret_target(turret: Dictionary, attack_range: float) -> int:
+	var turret_position: Vector2 = turret.get("pos", Vector2.ZERO)
+	var turret_kind: String = str(turret.get("kind", "machine_gun")).to_lower()
+	var best_target_index: int = -1
+	var best_score: float = -INF
+	var maximum_distance_squared: float = attack_range * attack_range
+	for target_index in range(zombies.size()):
+		var zombie: Dictionary = zombies[target_index]
+		var target_position: Vector2 = zombie.get("pos", Vector2.ZERO)
+		var distance_squared: float = turret_position.distance_squared_to(target_position)
+		if distance_squared > maximum_distance_squared:
+			continue
+		if not _has_clear_building_line_of_sight(turret_position, target_position):
+			continue
+		var zombie_kind: String = str(zombie.get("kind", "shambler")).to_lower()
+		var threat_weight: float = 1.0
+		if zombie_kind in ["brute", "spitter"]:
+			threat_weight = 4.0
+		elif zombie_kind in ["raider", "hostile_raider", "hostile raider"]:
+			threat_weight = 3.5
+		elif zombie_kind in ["runner", "fast"]:
+			threat_weight = 2.5
+		var role_weight: float = 1.0
+		if turret_kind == "sniper_tower":
+			role_weight = 1.35 if zombie_kind in ["brute", "spitter", "raider", "hostile_raider"] else 0.85
+		elif turret_kind == "machine_gun":
+			role_weight = 1.2 if zombie_kind in ["runner", "fast"] else 1.0
+		var score: float = threat_weight * role_weight * 100000.0 - distance_squared - float(target_index) * 0.001
+		if score > best_score:
+			best_score = score
+			best_target_index = target_index
+	return best_target_index
 
 func _find_unit_combat_target(position: Vector2, attack_range: float, sniper: bool) -> int:
 	var best_target_index: int = -1
@@ -6267,7 +6304,10 @@ func _milestone14_draw_work_zones() -> void:
 func _milestone14_draw_hud_panel() -> void:
 	if game_state != "playing" or command_tab != 1:
 		return
-	var panel_rect := Rect2(safe_insets.x + 8.0, safe_insets.y + 286.0, viewport_size.x - safe_insets.x - safe_insets.z - 16.0, 244.0)
+	var panel_top: float = safe_insets.y + 286.0
+	var panel_bottom: float = viewport_size.y - safe_insets.w - 8.0
+	var panel_height: float = maxf(180.0, minf(244.0, panel_bottom - panel_top))
+	var panel_rect := Rect2(safe_insets.x + 8.0, panel_top, viewport_size.x - safe_insets.x - safe_insets.z - 16.0, panel_height)
 	draw_rect(panel_rect, Color("#091713", 0.96))
 	draw_rect(panel_rect, Color("#5ecf91"), false, 2.0)
 	var population: int = citizens.size()
@@ -6296,7 +6336,10 @@ func _milestone14_draw_hud_panel() -> void:
 func _milestone14_handle_panel_tap(position: Vector2) -> bool:
 	if game_state != "playing" or command_tab != 1:
 		return false
-	var panel_rect := Rect2(safe_insets.x + 8.0, safe_insets.y + 286.0, viewport_size.x - safe_insets.x - safe_insets.z - 16.0, 244.0)
+	var panel_top: float = safe_insets.y + 286.0
+	var panel_bottom: float = viewport_size.y - safe_insets.w - 8.0
+	var panel_height: float = maxf(180.0, minf(244.0, panel_bottom - panel_top))
+	var panel_rect := Rect2(safe_insets.x + 8.0, panel_top, viewport_size.x - safe_insets.x - safe_insets.z - 16.0, panel_height)
 	if not panel_rect.has_point(position):
 		return false
 	var keys: Array[String] = ["GATHERERS", "ENGINEERS", "FACILITY", "SQUAD"]
@@ -7147,14 +7190,28 @@ func _milestone14_squad_ui_action(action: int) -> void:
 			var outpost_index: int = _nearest_outpost_index(camera_position)
 			if outpost_index >= 0:
 				target = _nearest_outpost_gate_position(outpost_index, camera_position)
-		for member_id in members:
+		var formation_forward: Vector2 = (target - camera_position).normalized()
+		if formation_forward.length_squared() < 0.001:
+			formation_forward = Vector2.DOWN
+		var formation_right: Vector2 = formation_forward.orthogonal()
+		for member_index in range(members.size()):
+			var member_id: int = int(members[member_index])
+			var formation_column: int = member_index % 4
+			var formation_row: int = int(member_index / 4)
+			var lateral_offset: float = (float(formation_column) - 1.5) * 34.0
+			var depth_offset: float = (float(formation_row) - 0.5) * 42.0
+			var member_target: Vector2 = target + formation_right * lateral_offset - formation_forward * depth_offset
+			member_target.x = clampf(member_target.x, 24.0, WORLD_SIZE.x - 24.0)
+			member_target.y = clampf(member_target.y, 24.0, WORLD_SIZE.y - 24.0)
 			for unit_index in range(units.size()):
 				var unit: Dictionary = units[unit_index]
-				if int(unit.get("survivor_id", -1)) == int(member_id):
-					unit["move_target"] = target
+				if int(unit.get("survivor_id", -1)) == member_id:
+					unit["move_target"] = member_target
+					unit["move_velocity"] = Vector2.ZERO
 					unit["manual_order"] = true
 					unit["ai_task"] = "SQUAD_DEPLOY" if action == 1 else "SQUAD_RECALL"
 					units[unit_index] = unit
+					break
 		squad["status"] = "DEPLOYED" if action == 1 else "RECALLING"
 		raid_squads[selected_raid_squad] = squad
 		message = "SQUAD DEPLOYED" if action == 1 else "SQUAD RECALL ORDERED"
