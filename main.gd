@@ -4815,18 +4815,26 @@ func _eject_outpost_shelter(outpost: Dictionary) -> void:
 	var sheltered: int = maxi(0, int(outpost.get("sheltered", 0)))
 	if sheltered <= 0:
 		return
-	var center: Vector2 = outpost["pos"]
+	var affected: int = mini(sheltered, 8)
 	var ejected: int = 0
-	for index in range(sheltered):
-		var angle: float = TAU * float(index) / float(maxi(sheltered, 1))
-		var candidate: Vector2 = center + Vector2(cos(angle), sin(angle)) * 42.0
-		if _is_open_world_position(candidate, 8.0):
-			civilians.append(candidate)
-			civilian_steering.append({})
-			ejected += 1
+	var outpost_rect: Rect2 = outpost.get("rect", Rect2(outpost.get("pos", Vector2.ZERO) - Vector2(110.0, 110.0), Vector2(220.0, 220.0)))
+	var center: Vector2 = outpost_rect.get_center()
+	var perimeter_radius: float = maxf(outpost_rect.size.x, outpost_rect.size.y) * 0.5 + 24.0
+	for index in range(mini(affected, 4)):
+		for attempt in range(16):
+			var angle: float = TAU * float(index * 4 + attempt) / 16.0
+			var candidate: Vector2 = center + Vector2(cos(angle), sin(angle)) * (perimeter_radius + float(attempt / 4) * 18.0)
+			if _is_open_world_position(candidate, 8.0):
+				civilians.append(candidate)
+				civilian_steering.append({})
+				ejected += 1
+				break
+	# The destroyed outpost is removed immediately after this call, so all
+	# sheltered civilians not successfully ejected are recorded as casualties.
+	outpost["sheltered"] = 0
 	lost_count += sheltered - ejected
 	if ejected > 0:
-		message = "OUTPOST BREACHED — %d CIVILIANS EJECTED" % ejected
+		message = "OUTPOST COLLAPSE — %d CIVILIANS EJECTED" % ejected
 		message_timer = 1.5
 
 func _total_sheltered_civilians() -> int:
@@ -5290,6 +5298,17 @@ func _milestone13_spawn_survivors(origin: Vector2, hq_building_index: int = -1) 
 					break
 		spawn_positions.append(selected_spawn)
 		units.append({"id": _next_unit_id(), "survivor_id": int(survivors[i]["id"]), "pos": selected_spawn, "kind": str(survivors[i]["role"]).to_lower(), "cooldown": 0.2, "hp": 100.0, "max_hp": 100.0, "kills": 0, "rank": 0, "garrisoned": false, "garrison_building": -1, "move_target": null, "manual_order": false, "ai_task": "", "steering": {}, "triage_timer": 0.0, "status": ""})
+	# Guaranteed final fallback: preserve the full convoy roster even when every
+	# validated street spawn is blocked by map geometry.
+	while units.size() < survivors.size():
+		var survivor_index: int = units.size()
+		var ring_index: int = survivor_index
+		var fallback_radius: float = maxf(half_extent.x, half_extent.y) + 280.0 + float(ring_index / 8) * 48.0
+		var fallback_angle: float = TAU * float(ring_index % 8) / 8.0
+		var fallback_position: Vector2 = origin + Vector2(cos(fallback_angle), sin(fallback_angle)) * fallback_radius
+		fallback_position.x = clampf(fallback_position.x, 32.0, WORLD_SIZE.x - 32.0)
+		fallback_position.y = clampf(fallback_position.y, 32.0, WORLD_SIZE.y - 32.0)
+		units.append({"id": _next_unit_id(), "survivor_id": int(survivors[survivor_index]["id"]), "pos": fallback_position, "kind": str(survivors[survivor_index]["role"]).to_lower(), "cooldown": 0.2, "hp": 100.0, "max_hp": 100.0, "kills": 0, "rank": 0, "garrisoned": false, "garrison_building": -1, "move_target": null, "manual_order": false, "ai_task": "", "steering": {}, "triage_timer": 0.0, "status": ""})
 
 func _milestone13_assign_role(index: int, role: String) -> void:
 	if index < 0 or index >= survivors.size():
@@ -5346,6 +5365,7 @@ func _milestone13_tick_construction(delta: float) -> void:
 			site["progress"] = minf(100.0, float(site.get("progress", 0.0)) + delta * rate * 4.0)
 			if float(site["progress"]) >= 100.0:
 				site["constructing"] = false
+				_rebuild_static_building_grid()
 				for survivor_index in range(survivors.size()):
 					if str(survivors[survivor_index].get("role", "")) in ["WORKER", "ENGINEER"]:
 						survivors[survivor_index]["build_xp"] = int(survivors[survivor_index].get("build_xp", 0)) + 5
@@ -5827,6 +5847,7 @@ func _resume_operation() -> void:
 		civilian_steering.append({})
 	_rebuild_zombie_spatial_grid()
 	_rebuild_spatial_grid(civilian_grid, civilians)
+	_rebuild_static_building_grid()
 	campaign_started = not outposts.is_empty()
 	campaign_start_grace_timer = 1.0
 	manual_paused = false
