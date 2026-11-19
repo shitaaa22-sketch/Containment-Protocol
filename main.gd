@@ -7176,6 +7176,42 @@ func _milestone14_draw_faction_banners() -> void:
 			_draw_text(labels[j], rect.position + Vector2(5.0, 26.0), 9, Color("#ffffff"))
 
 
+func _milestone17_resolve_formation_slot(candidate: Vector2) -> Vector2:
+	var resolved: Vector2 = candidate
+	resolved.x = clampf(resolved.x, 24.0, WORLD_SIZE.x - 24.0)
+	resolved.y = clampf(resolved.y, 24.0, WORLD_SIZE.y - 24.0)
+	if _milestone17_is_formation_slot_clear(resolved):
+		return resolved
+	var best_position: Vector2 = resolved
+	var best_distance_squared: float = INF
+	for ring in range(1, 9):
+		var search_radius: float = float(ring) * 18.0
+		for direction_index in range(16):
+			var angle: float = TAU * float(direction_index) / 16.0
+			var candidate_position: Vector2 = resolved + Vector2(cos(angle), sin(angle)) * search_radius
+			candidate_position.x = clampf(candidate_position.x, 24.0, WORLD_SIZE.x - 24.0)
+			candidate_position.y = clampf(candidate_position.y, 24.0, WORLD_SIZE.y - 24.0)
+			if not _milestone17_is_formation_slot_clear(candidate_position):
+				continue
+			var distance_squared: float = resolved.distance_squared_to(candidate_position)
+			if distance_squared < best_distance_squared:
+				best_distance_squared = distance_squared
+				best_position = candidate_position
+		if best_distance_squared < INF:
+			break
+	return best_position
+
+func _milestone17_is_formation_slot_clear(candidate: Vector2) -> bool:
+	var clearance_rect: Rect2 = Rect2(candidate - Vector2(10.0, 10.0), Vector2(20.0, 20.0))
+	for building_index in _building_indices_for_rect(clearance_rect):
+		if building_index >= buildings.size() or building_index >= building_archetypes.size():
+			continue
+		if bool(building_archetypes[building_index].get("destroyed", false)):
+			continue
+		if buildings[building_index].grow(10.0).has_point(candidate):
+			return false
+	return true
+
 func _milestone14_squad_ui_action(action: int) -> void:
 	if action == 0:
 		_milestone14_create_raid_squad()
@@ -7203,6 +7239,7 @@ func _milestone14_squad_ui_action(action: int) -> void:
 			var member_target: Vector2 = target + formation_right * lateral_offset - formation_forward * depth_offset
 			member_target.x = clampf(member_target.x, 24.0, WORLD_SIZE.x - 24.0)
 			member_target.y = clampf(member_target.y, 24.0, WORLD_SIZE.y - 24.0)
+			member_target = _milestone17_resolve_formation_slot(member_target)
 			for unit_index in range(units.size()):
 				var unit: Dictionary = units[unit_index]
 				if int(unit.get("survivor_id", -1)) == member_id:
