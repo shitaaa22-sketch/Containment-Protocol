@@ -239,6 +239,65 @@ var menu_fade_alpha: float = 0.0
 var menu_transition_timer: float = 0.0
 var menu_transition_action: String = ""
 var menu_transition_sector: int = 0
+var update_request: HTTPRequest
+var update_status: String = "CHECKING FOR UPDATES"
+var update_available: bool = false
+var latest_apk_url: String = ""
+var update_check_started: bool = false
+
+func _setup_update_checker() -> void:
+	update_request = HTTPRequest.new()
+	update_request.timeout = 15.0
+	add_child(update_request)
+	update_request.request_completed.connect(_on_update_check_completed)
+	_check_for_game_updates()
+
+func _check_for_game_updates() -> void:
+	if update_request == null or update_request.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		return
+	update_status = "CHECKING FOR UPDATES"
+	update_check_started = true
+	var headers: PackedStringArray = ["User-Agent: ContainmentProtocol-Android", "Accept: application/vnd.github+json"]
+	var request_error: int = update_request.request("https://api.github.com/repos/shitaaa22-sketch/Containment-Protocol/releases/tags/latest-android-apk", headers)
+	if request_error != OK:
+		update_status = "UPDATE CHECK FAILED"
+		update_check_started = false
+		queue_redraw()
+
+func _on_update_check_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	update_check_started = false
+	update_available = false
+	latest_apk_url = ""
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		update_status = "UPDATE CHECK UNAVAILABLE"
+		queue_redraw()
+		return
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if not parsed is Dictionary:
+		update_status = "UPDATE CHECK UNAVAILABLE"
+		queue_redraw()
+		return
+	var release: Dictionary = parsed as Dictionary
+	var release_body: String = str(release.get("body", ""))
+	var installed_commit: String = str(ProjectSettings.get_setting("application/config/version", "dev"))
+	var latest_commit: String = ""
+	for line in release_body.split("\n"):
+		if line.begins_with("Commit "):
+			latest_commit = line.trim_prefix("Commit ").strip_edges()
+			break
+	for asset_value in release.get("assets", []):
+		if asset_value is Dictionary and str((asset_value as Dictionary).get("name", "")) == "ContainmentProtocol.apk":
+			latest_apk_url = str((asset_value as Dictionary).get("browser_download_url", ""))
+			break
+	update_available = not latest_apk_url.is_empty() and not latest_commit.is_empty() and latest_commit != installed_commit
+	update_status = "UPDATE AVAILABLE — TAP TO DOWNLOAD" if update_available else "GAME IS UP TO DATE"
+	queue_redraw()
+
+func _open_latest_game_update() -> void:
+	if update_available and not latest_apk_url.is_empty():
+		OS.shell_open(latest_apk_url)
+	else:
+		_check_for_game_updates()
 
 func _ready() -> void:
 	randomize()
@@ -249,6 +308,7 @@ func _ready() -> void:
 	_configure_sector(0)
 	_load_persistent_records()
 	_setup_audio()
+	_setup_update_checker()
 	game_state = "title"
 	queue_redraw()
 
@@ -2959,6 +3019,11 @@ func _handle_title_touch(canvas_position: Vector2) -> bool:
 		_queue_sfx("menu_click")
 		queue_redraw()
 		return true
+	if _get_title_update_rect().has_point(title_position):
+		_open_latest_game_update()
+		_queue_sfx("menu_click")
+		queue_redraw()
+		return true
 	if _get_title_manual_rect().has_point(title_position):
 		title_manual_open = true
 		_queue_sfx("menu_click")
@@ -3724,6 +3789,10 @@ func _get_title_manual_rect() -> Rect2:
 	var button_height: float = maxf(64.0, title_size.y * 0.058)
 	return Rect2(title_size.x * 0.055, title_size.y * 0.815, title_size.x * 0.43, button_height)
 
+func _get_title_update_rect() -> Rect2:
+	var title_size: Vector2 = _safe_viewport_size()
+	return Rect2(title_size.x * 0.055, title_size.y * 0.895, title_size.x * 0.89, maxf(42.0, title_size.y * 0.042))
+
 func _get_title_sfx_rect() -> Rect2:
 	var title_size: Vector2 = _safe_viewport_size()
 	var button_height: float = maxf(64.0, title_size.y * 0.058)
@@ -3842,6 +3911,10 @@ func _draw_title_screen() -> void:
 	draw_rect(sfx_rect, Color("#173b2b", 0.98))
 	draw_rect(sfx_rect, Color("#79c995"), false, 2.0)
 	_draw_text("[SFX: %s]" % ("ON" if sfx_enabled else "OFF"), sfx_rect.position + Vector2(18.0, sfx_rect.size.y * 0.65), roundi(14.0 * ui_scale), Color("#c9e6d1"))
+	var update_rect: Rect2 = _get_title_update_rect()
+	draw_rect(update_rect, Color("#183b2b"))
+	draw_rect(update_rect, Color("#79c995") if update_available else Color("#527966"), false, 1.5)
+	_draw_text(update_status, update_rect.position + Vector2(12.0, update_rect.size.y * 0.68), roundi(11.0 * ui_scale), Color("#e1f7e8"))
 	_draw_text("TACTICAL RESPONSE COMMAND  //  SECURE THE EXCLUSION ZONE", Vector2(title_size.x * 0.07, title_size.y * 0.925), roundi(9.0 * ui_scale), Color("#6e9680"))
 	_draw_field_manual(title_size)
 
