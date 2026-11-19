@@ -93,6 +93,17 @@ jobs:
           echo "Godot Android templates:"
           ls -lh "$TEMPLATE_DIR"/android_*
 
+      - name: Validate GDScript project
+        shell: bash
+        run: |
+          set -euo pipefail
+          VALIDATION_LOG="$RUNNER_TEMP/godot-validation.log"
+          ./Godot_v4.3-stable_linux.x86_64 --headless --path "$GITHUB_WORKSPACE" --editor --quit 2>&1 | tee "$VALIDATION_LOG"
+          if grep -E "SCRIPT ERROR:|Parse Error:|Failed to load script" "$VALIDATION_LOG"; then
+            echo "Godot reported a GDScript parse/load error."
+            exit 1
+          fi
+
       - name: Configure Godot Android settings and persistent release signing
         shell: bash
         env:
@@ -129,17 +140,6 @@ jobs:
           sed -i "s/^config\/version=.*/config\/version=\"$GITHUB_SHA\"/" project.godot
           sed -i "s/^version\/code=.*/version\/code=$GITHUB_RUN_NUMBER/" export_presets.cfg
           sed -i "s/^version\/name=.*/version\/name=\"1.0.$GITHUB_RUN_NUMBER\"/" export_presets.cfg
-
-      - name: Validate GDScript project
-        shell: bash
-        run: |
-          set -euo pipefail
-          VALIDATION_LOG="$RUNNER_TEMP/godot-validation.log"
-          ./Godot_v4.3-stable_linux.x86_64 --headless --path "$GITHUB_WORKSPACE" --editor --quit 2>&1 | tee "$VALIDATION_LOG"
-          if grep -E "SCRIPT ERROR:|Parse Error:|Failed to load script" "$VALIDATION_LOG"; then
-            echo "Godot reported a GDScript parse/load error."
-            exit 1
-          fi
 
       - name: Export signed Android APK
         shell: bash
